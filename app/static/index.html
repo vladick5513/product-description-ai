@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Черновик карточки товара</title>
+<style>
+  :root { --line: #d5d9de; --text: #1c2126; --muted: #5d6670; --accent: #0b5cad;
+          --warn-bg: #fff6e0; --warn: #7a5300; --err-bg: #fdecea; --err: #a02018; --ok-bg: #e7f5ec; --ok: #17663a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f6f7; color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px; display: grid; gap: 20px; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; }
+  h1 { font-size: 22px; margin: 0 0 4px; grid-column: 1 / -1; }
+  h2 { font-size: 15px; margin: 16px 0 6px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  .hint { color: var(--muted); font-weight: 400; font-size: 13px; }
+  input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  textarea { resize: vertical; }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; margin-top: 16px; width: 100%; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .note { padding: 10px 12px; border-radius: 6px; margin-bottom: 10px; overflow-wrap: anywhere; }
+  .note ul { margin: 4px 0 0; padding-left: 18px; }
+  .ok { background: var(--ok-bg); color: var(--ok); }
+  .warn { background: var(--warn-bg); color: var(--warn); }
+  .err { background: var(--err-bg); color: var(--err); white-space: pre-wrap; }
+  .bar { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  pre { margin: 0; padding: 12px; background: #f5f6f7; border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 70vh; overflow: auto; }
+  [hidden] { display: none !important; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Черновик карточки товара</h1>
+
+  <section>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-input="form" aria-selected="true">Форма</button>
+      <button type="button" role="tab" data-input="json" aria-selected="false">JSON</button>
+    </div>
+
+    <form id="card-form" novalidate>
+      <div id="form-input">
+        <label for="name">Название</label>
+        <input id="name" autocomplete="off">
+        <label for="manufacturer">Производитель</label>
+        <input id="manufacturer" autocomplete="off">
+        <label for="specs">Характеристики <span class="hint">по одной на строку: название: значение</span></label>
+        <textarea id="specs" rows="8" class="mono" placeholder="диапазон измерений: 0–1,6 МПа&#10;класс точности: 1,5"></textarea>
+        <label for="description">Описание или фрагмент паспорта</label>
+        <textarea id="description" rows="6"></textarea>
+      </div>
+      <div id="json-input" hidden>
+        <label for="json">Данные товара</label>
+        <textarea id="json" rows="22" class="mono" spellcheck="false">{
+  "name": "Манометр показывающий DM 02",
+  "manufacturer": "Манотомь",
+  "specs": {
+    "диапазон измерений": "0–1,6 МПа",
+    "класс точности": "1,5",
+    "присоединение": "G1/2",
+    "диаметр корпуса": "100 мм"
+  },
+  "description": "Прибор предназначен для измерения избыточного давления..."
+}</textarea>
+      </div>
+      <button class="primary" id="submit">Сформировать карточку</button>
+    </form>
+  </section>
+
+  <section aria-live="polite">
+    <div id="placeholder" class="hint">Здесь появится результат. Обычно это занимает до минуты.</div>
+    <div id="error" class="note err" hidden></div>
+    <div id="result" hidden>
+      <div id="status" class="note"></div>
+      <div id="notes"></div>
+      <div class="bar">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" data-output="markdown" aria-selected="true">Markdown</button>
+          <button type="button" role="tab" data-output="json" aria-selected="false">JSON</button>
+        </div>
+        <button type="button" id="copy">Скопировать</button>
+      </div>
+      <pre id="output" tabindex="0"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let inputMode = "form";
+  let outputMode = "markdown";
+  let lastResult = null;
+
+  function selectTab(attr, value) {
+    document.querySelectorAll(`[data-${attr}]`).forEach((tab) => {
+      tab.setAttribute("aria-selected", String(tab.dataset[attr] === value));
+    });
+  }
+
+  document.querySelectorAll("[data-input]").forEach((tab) => tab.addEventListener("click", () => {
+    inputMode = tab.dataset.input;
+    selectTab("input", inputMode);
+    $("form-input").hidden = inputMode !== "form";
+    $("json-input").hidden = inputMode !== "json";
+  }));
+
+  document.querySelectorAll("[data-output]").forEach((tab) => tab.addEventListener("click", () => {
+    outputMode = tab.dataset.output;
+    selectTab("output", outputMode);
+    renderOutput();
+  }));
+
+  function readForm() {
+    const specs = {};
+    for (const line of $("specs").value.split("\n")) {
+      if (!line.trim()) continue;
+      const colon = line.indexOf(":");
+      if (colon === -1) throw new Error(`В строке характеристик нет двоеточия: «${line.trim()}»`);
+      specs[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    }
+    return {
+      name: $("name").value,
+      manufacturer: $("manufacturer").value.trim() || null,
+      specs,
+      description: $("description").value.trim() || null,
+    };
+  }
+
+  function readJson() {
+    try {
+      return JSON.parse($("json").value);
+    } catch (error) {
+      throw new Error(`Некорректный JSON: ${error.message}`);
+    }
+  }
+
+  function describeError(status, body) {
+    if (Array.isArray(body?.detail)) {
+      return body.detail.map((item) => {
+        const field = item.loc.filter((part) => part !== "body").join(".");
+        const message = item.msg.replace(/^Value error, /, "");
+        return field ? `${field}: ${message}` : message;
+      }).join("\n");
+    }
+    return body?.detail || `Сервер вернул ошибку ${status}`;
+  }
+
+  function showError(message) {
+    $("error").textContent = message;
+    $("error").hidden = false;
+    $("placeholder").hidden = true;
+    $("result").hidden = true;
+  }
+
+  function addNote(title, items, kind) {
+    if (!items.length) return;
+    const note = document.createElement("div");
+    note.className = `note ${kind}`;
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const list = document.createElement("ul");
+    for (const item of items) {
+      const row = document.createElement("li");
+      row.textContent = item;
+      list.append(row);
+    }
+    note.append(heading, list);
+    $("notes").append(note);
+  }
+
+  function renderOutput() {
+    if (!lastResult) return;
+    $("output").textContent = outputMode === "markdown"
+      ? lastResult.markdown
+      : JSON.stringify(lastResult.card, null, 2);
+  }
+
+  function showResult(result) {
+    lastResult = result;
+    $("error").hidden = true;
+    $("placeholder").hidden = true;
+    $("result").hidden = false;
+    const ready = result.status === "ready";
+    $("status").className = `note ${ready ? "ok" : "warn"}`;
+    $("status").textContent =
+      `${ready ? "Готово к вычитке" : "Требует проверки"}. ` +
+      `Заголовок: ${result.seo_title_length} симв., описание: ${result.seo_description_length} симв.`;
+    $("notes").replaceChildren();
+    addNote("Не прошло автоматическую проверку:", result.warnings, "err");
+    addNote("Нет во входных данных:", result.missing_fields, "warn");
+    addNote("Уточнить:", result.card.clarifications, "warn");
+    renderOutput();
+  }
+
+  $("card-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    let payload;
+    try {
+      payload = inputMode === "form" ? readForm() : readJson();
+    } catch (error) {
+      showError(error.message);
+      return;
+    }
+    $("submit").disabled = true;
+    $("submit").textContent = "Формируем…";
+    try {
+      const response = await fetch("/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => null);
+      if (response.ok) showResult(body);
+      else showError(describeError(response.status, body));
+    } catch {
+      showError("Не удалось связаться с сервером");
+    } finally {
+      $("submit").disabled = false;
+      $("submit").textContent = "Сформировать карточку";
+    }
+  });
+
+  $("copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("output").textContent);
+      $("copy").textContent = "Скопировано";
+    } catch {
+      $("copy").textContent = "Не удалось скопировать";
+    }
+    setTimeout(() => { $("copy").textContent = "Скопировать"; }, 1500);
+  });
+</script>
+</body>
+</html>

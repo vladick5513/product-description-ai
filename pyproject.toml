@@ -1,0 +1,20 @@
+[project]
+name = "product-description-ai"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+env = [
+  "OPENAI_API_KEY=test-key",
+  "LLM_MODEL=test-model",
+  "LOG_LEVEL=WARNING",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
